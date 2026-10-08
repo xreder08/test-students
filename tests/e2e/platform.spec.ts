@@ -1,0 +1,84 @@
+import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { createClient } from '@libsql/client';
+const origin='http://127.0.0.1:3000';
+const password='TestPassword-'+Date.now()+'!';
+const stamp=Date.now();
+const teacherEmail=`teacher-${stamp}@example.test`, studentEmail=`student-${stamp}@example.test`;
+test('teacher uploads a book; student reads, learns with real AI, tests and resumes safely',async({browser})=>{
+  const teacher=await browser.newContext(),student=await browser.newContext();
+  const tp=await teacher.newPage(),sp=await student.newPage();
+  const errors:string[]=[];tp.on('pageerror',e=>errors.push(e.message));sp.on('pageerror',e=>errors.push(e.message));
+  const unauth=await student.request.get('/api/books');expect(unauth.status()).toBe(401);
+  const csrf=await student.request.post('/api/auth',{data:{action:'register',email:studentEmail,password,name:'Ученик'}});expect(csrf.status()).toBe(403);
+  const escalation=await teacher.request.post('/api/auth',{headers:{Origin:origin},data:{action:'register',email:teacherEmail,password,name:'Учитель',role:'teacher',inviteCode:'wrong'}});expect(escalation.status()).toBe(403);
+  const register=await teacher.request.post('/api/auth',{headers:{Origin:origin},data:{action:'register',email:teacherEmail,password,name:'Учитель',role:'teacher',inviteCode:process.env.TEACHER_INVITE_CODE}});expect(register.status()).toBe(200);
+  await tp.goto('/');await expect(tp.getByRole('heading',{name:'Привет, Учитель!'})).toBeVisible();
+  await tp.getByRole('button',{name:'Добавить книгу',exact:true}).click();
+  const content='# Глава 1. Дроби\n\nДробь показывает часть целого. Числитель показывает количество взятых частей, знаменатель — на сколько равных частей разделили целое.\n\nНапример, 3/4 означает три части из четырёх равных частей. В дроби 3/4 числитель равен 3, а знаменатель равен 4. Если пирог разрезали на четыре равных куска и взяли один, получили 1/4 пирога.\n\nПри одинаковых знаменателях больше та дробь, у которой больше числитель: 3/5 больше 2/5. При сложении дробей с одинаковыми знаменателями складывают числители, а знаменатель оставляют: 1/5 + 2/5 = 3/5.\n\n# Глава 2. Проценты\n\nПроцент — одна сотая часть целого. 50 процентов составляют половину целого. 25 процентов составляют четверть. Чтобы найти 10 процентов от 200, нужно разделить 200 на 10, получится 20. Проценты помогают сравнивать доли разных величин. Сто процентов обозначают всё целое. Десять процентов от 100 равны 10.';
+  await tp.getByLabel('Файл книги').setInputFiles({name:'math-book.txt',mimeType:'text/plain',buffer:Buffer.from(content)});
+  await tp.getByLabel('Название книги',{exact:true}).fill('Учебная математика E2E');
+  await tp.getByLabel('Предмет',{exact:true}).fill('Математика');
+  await tp.getByRole('button',{name:'Добавить в библиотеку'}).click();
+  await expect(tp.locator('.reading-panel h1')).toHaveText('Глава 1. Дроби');
+  const bookId=new URL(tp.url()).searchParams.get('book')!;
+  const bookDetails=await (await teacher.request.get(`/api/books/${bookId}`)).json();expect(bookDetails.chapters).toHaveLength(2);
+  const chapterId=bookDetails.chapters[0].id;
+  await tp.getByRole('button',{name:'Создать тест вручную'}).click();
+  const manual=tp.getByRole('dialog',{name:'Создать тест вручную'});
+  await manual.getByLabel('Текст вопроса').fill('Что показывает знаменатель дроби?');
+  await manual.getByLabel('Вариант 1 вопроса 1',{exact:true}).fill('Количество равных частей целого');
+  await manual.getByLabel('Вариант 2 вопроса 1',{exact:true}).fill('Количество взятых частей');
+  await manual.getByLabel('Вариант 3 вопроса 1',{exact:true}).fill('Сумму частей');
+  await manual.getByLabel('Вариант 4 вопроса 1',{exact:true}).fill('Название числа');
+  await manual.getByLabel('Пояснение ответа').fill('Знаменатель показывает число равных частей целого.');
+  await manual.getByRole('button',{name:'Сохранить тест'}).click();await expect(manual).not.toBeVisible();
+  await tp.getByRole('button',{name:'Библиотека',exact:false}).first().click();
+  await tp.screenshot({path:'test-results/teacher-library.png',fullPage:true});
+  await sp.goto('/');await sp.getByRole('button',{name:'Регистрация',exact:true}).click();
+  await sp.getByLabel('Имя',{exact:true}).fill('Ученик');await sp.getByLabel('Email',{exact:true}).fill(studentEmail);await sp.getByLabel('Пароль',{exact:true}).fill(password);await sp.getByRole('button',{name:'Создать аккаунт'}).click();
+  await expect(sp.getByRole('heading',{name:'Привет, Ученик!'})).toBeVisible();
+  const forbidden=await student.request.post('/api/books',{headers:{Origin:origin},data:{}});expect(forbidden.status()).toBe(403);
+  const early=await student.request.post('/api/tests/generate',{headers:{Origin:origin},data:{chapterId,automatic:true}});expect(early.status()).toBe(403);
+  await sp.getByRole('button',{name:/Учебная математика E2E/}).click();await expect(sp.locator('.reading-panel h1')).toHaveText('Глава 1. Дроби');
+  await sp.screenshot({path:'test-results/reader-desktop.png',fullPage:true});
+  const tutorResponse=sp.waitForResponse(r=>r.url().endsWith('/api/tutor')&&r.request().method()==='POST');
+  await sp.getByRole('button',{name:'Объясни проще'}).click();
+  const realTutor=await tutorResponse;expect(realTutor.status()).toBe(200);const tutorData=await realTutor.json();expect(tutorData.answer.length).toBeGreaterThan(80);
+  await expect(sp.locator('.chat-message.assistant')).toBeVisible();
+  await sp.getByRole('button',{name:'Глава изучена',exact:true}).click();
+  await expect(sp.locator('.question-card')).toBeVisible({timeout:65000});
+  const attemptId=new URL(sp.url()).searchParams.get('attempt')!;
+  const activeBefore=await (await student.request.get(`/api/attempts/${attemptId}`)).json();
+  expect(activeBefore.attempt.questions).toHaveLength(5);expect(activeBefore.attempt.questions[0]).not.toHaveProperty('correct');
+  await sp.locator('.answer-option').first().click();await expect(sp.getByText('Ответы сохраняются.',{exact:false})).toBeVisible();
+  await sp.reload();await expect(sp.locator('.question-card')).toBeVisible();
+  const activeAfter=await (await student.request.get(`/api/attempts/${attemptId}`)).json();expect(activeAfter.attempt.deadline).toBe(activeBefore.attempt.deadline);expect(Object.keys(activeAfter.attempt.answers)).toHaveLength(1);
+  const wrongAccess=await teacher.request.get(`/api/attempts/${attemptId}`);expect(wrongAccess.status()).toBe(404);
+  for(let i=0;i<5;i++){
+    await sp.locator('.answer-option').first().click();await expect(sp.getByText('Ответы сохраняются.',{exact:false})).toBeVisible();
+    if(i<4)await sp.getByRole('button',{name:'Далее',exact:true}).click();
+  }
+  await sp.getByRole('button',{name:'Завершить тест',exact:true}).click();await expect(sp.getByText('ТЕСТ ЗАВЕРШЁН')).toBeVisible();
+  const finished=await (await student.request.get(`/api/attempts/${attemptId}`)).json();expect(finished.attempt.status).toBe('finished');expect(finished.attempt.feedback).toHaveLength(5);
+  const again=await (await student.request.post(`/api/attempts/${attemptId}`,{headers:{Origin:origin},data:{answers:{}}})).json();expect(again.attempt.score).toBe(finished.attempt.score);
+  await sp.screenshot({path:'test-results/result-desktop.png',fullPage:true});
+  // The server, not browser time, rejects submissions after deadline.
+  const testId=activeBefore.attempt.testId;
+  const second=await (await student.request.post(`/api/tests/${testId}/start`,{headers:{Origin:origin},data:{}})).json();
+  const client=createClient({url:process.env.DATABASE_URL!});
+  await client.execute({sql:'UPDATE attempts SET deadline=? WHERE id=?',args:[new Date(Date.now()-1000).toISOString(),second.id]});
+  const late=await (await student.request.patch(`/api/attempts/${second.id}`,{headers:{Origin:origin},data:{answers:{[activeBefore.attempt.questions[0].id]:0}}})).json();expect(late.attempt.status).toBe('finished');expect(late.attempt.score).toBe(0);expect(late.attempt.answers).toEqual({});
+  await sp.setViewportSize({width:390,height:844});await sp.goto(`/?view=reader&book=${bookId}&chapter=${chapterId}`);await expect(sp.locator('.reading-panel h1')).toBeVisible();
+  expect(await sp.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();await sp.screenshot({path:'test-results/reader-mobile.png',fullPage:true});
+  await sp.getByRole('button',{name:'Открыть меню'}).click();await sp.getByRole('button',{name:'Библиотека',exact:false}).first().click();await expect(sp.getByRole('heading',{name:'Библиотека книг'})).toBeVisible();expect(await sp.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+  await sp.screenshot({path:'test-results/library-mobile.png',fullPage:true,animations:'disabled'});
+  expect(errors).toEqual([]);
+  // Remove only these test accounts and the book uploaded by this test.
+  await teacher.request.delete(`/api/books/${bookId}`,{headers:{Origin:origin}});
+  for(const email of [teacherEmail,studentEmail]){
+    const row=(await client.execute({sql:'SELECT id FROM users WHERE email=?',args:[email]})).rows[0];if(!row)continue;
+    await client.batch([{sql:'DELETE FROM progress WHERE user_id=?',args:[row.id]},{sql:'DELETE FROM sessions WHERE user_id=?',args:[row.id]},{sql:'DELETE FROM users WHERE id=?',args:[row.id]}],'write');
+  }
+  client.close();await teacher.close();await student.close();
+});

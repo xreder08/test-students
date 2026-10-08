@@ -1,0 +1,34 @@
+{
+  "name": "edutest-web",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/core.test.ts",
+    "test:e2e": "playwright test",
+    "setup:local": "node --env-file=.env.local --import tsx scripts/bootstrap.ts",
+    "check:secrets": "node scripts/check-secrets.mjs"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0",
+    "lucide-react": "^0.577.0",
+    "fflate": "^0.8.2",
+    "next": "16.4.0",
+    "pdf-parse": "2.4.5",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0"
+  }
+}

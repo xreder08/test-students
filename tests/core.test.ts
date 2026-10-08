@@ -1,0 +1,64 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { zipSync, strToU8 } from 'fflate';
+import { splitChapters, extractBook, extractArchive } from '../src/lib/books';
+import { generatedTestSchema, authSchema } from '../src/lib/validation';
+import { hashPassword, verifyPassword } from '../src/lib/auth';
+import { shuffleQuestions, scoreQuestions } from '../src/lib/testing';
+
+test('passwords are salted and verified without storing plaintext',async()=>{
+  const first=await hashPassword('SomePassword123!'),second=await hashPassword('SomePassword123!');
+  assert.notEqual(first,second);assert(!first.includes('SomePassword123!'));
+  assert(await verifyPassword('SomePassword123!',first));assert(!await verifyPassword('WrongPassword123!',first));
+});
+test('AI validation rejects invalid answers, duplicate options and truncated output',()=>{
+  const valid={text:'Какое число больше?',options:['1','2','3','4'],correct:3,explanation:'Число 4 больше остальных.'};
+  assert(generatedTestSchema.safeParse({questions:[valid,valid,valid]}).success);
+  assert(!generatedTestSchema.safeParse({questions:[{...valid,correct:-1},valid,valid]}).success);
+  assert(!generatedTestSchema.safeParse({questions:[{...valid,options:['1','1','3','4']},valid,valid]}).success);
+  assert(!generatedTestSchema.safeParse({questions:[valid]}).success);
+});
+test('whitespace accounts and short passwords are rejected',()=>{
+  assert(!authSchema.safeParse({name:'  ',email:' ',password:'x'}).success);
+  assert(authSchema.safeParse({name:'Anna',email:'anna@example.com',password:'longpassword123'}).success);
+});
+test('chapter extraction preserves content and splits long chapters on boundaries',()=>{
+  const text='# Глава 1. Числа\n'+('Натуральные числа нужны для счёта.\n\n'.repeat(15))+'\n# Глава 2. Сложение\n'+('Сложение объединяет количества.\n\n'.repeat(15));
+  const chapters=splitChapters(text);assert.equal(chapters.length,2);assert.equal(chapters[1].title,'Глава 2. Сложение');
+  assert(splitChapters('Очень длинный учебный материал.\n\n'.repeat(1000)).every(c=>c.content.length<=12000));
+  assert.throws(()=>splitChapters('Нет текста'));
+});
+test('shuffling preserves answer meaning and scoring',()=>{
+  const input=[{id:'q1',text:'2+2?',options:['3','4','5','6'],correct:1,explanation:'2+2=4'}];
+  for(let i=0;i<100;i++){
+    const shuffled=shuffleQuestions(input);assert.equal(shuffled[0].options[shuffled[0].correct],'4');
+    assert.deepEqual(scoreQuestions(shuffled,{q1:shuffled[0].correct}),{score:1,maxScore:1});
+  }
+  assert.deepEqual(scoreQuestions(input,{}),{score:0,maxScore:1});
+});
+test('DOCX reads text without including external relationships',async()=>{
+  const zip=zipSync({'word/document.xml':strToU8('<w:document><w:p><w:r><w:t>Глава 1. Числа</w:t></w:r></w:p><w:p><w:r><w:t>'+('Числа используются для счёта предметов. '.repeat(12))+'</w:t></w:r></w:p></w:document>'),'word/_rels/document.xml.rels':strToU8('<Relationship Target="https://example.com/private"/>')});
+  const file=new File([zip as unknown as BlobPart],'book.docx');const result=await extractBook(file);
+  assert(result.chapters[0].content.includes('Числа используются'));assert(!result.chapters[0].content.includes('https://'));
+});
+test('archive inflation is bounded to prevent compressed document bombs',()=>{
+  const zip=zipSync({'word/document.xml':new Uint8Array(13*1024*1024)});
+  assert.throws(()=>extractArchive(zip,name=>name==='word/document.xml'));
+});
+test('EPUB follows spine order rather than archive file order',async()=>{
+  const text='Учебный материал для учеников. '.repeat(15);
+  const zip=zipSync({'OEBPS/two.xhtml':strToU8('<html><h1>Вторая глава</h1><p>'+text+'</p></html>'),'OEBPS/one.xhtml':strToU8('<html><h1>Первая глава</h1><p>'+text+'</p></html>'),'OEBPS/content.opf':strToU8('<package><manifest><item id="one" href="one.xhtml"/><item id="two" href="two.xhtml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>')});
+  const result=await extractBook(new File([zip as unknown as BlobPart],'book.epub'));
+  assert.equal(result.chapters[0].title,'Первая глава');assert.equal(result.chapters[1].title,'Вторая глава');
+});
+test('PDF uploads extract real document text and reject forged signatures',async()=>{
+  // A small valid PDF fixture, generated without an additional production dependency.
+  const text='Natural numbers count objects. One two three four five. A digit has a place value. Hundreds tens and units make a decimal number. Addition combines quantities. Subtraction finds a difference. A number on the right of the number line is greater.';
+  const stream=`BT /F1 10 Tf 20 700 Td (${text}) Tj ET`;
+  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 2000 800] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`];
+  let pdf='%PDF-1.4\n';const offsets=[0];
+  objects.forEach((object,i)=>{offsets.push(Buffer.byteLength(pdf));pdf+=`${i+1} 0 obj\n${object}\nendobj\n`;});
+  const xref=Buffer.byteLength(pdf);pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(o=>String(o).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  const result=await extractBook(new File([pdf],'lesson.pdf'));assert(result.chapters[0].content.includes('Natural numbers count objects'));
+  await assert.rejects(()=>extractBook(new File(['fake'],'fake.pdf')));
+});
