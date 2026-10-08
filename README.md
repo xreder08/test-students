@@ -25,7 +25,7 @@ npm run setup:local
 npm run dev
 ```
 
-Обязательные параметры: `GROQ_API_KEY`, `SESSION_SECRET` (случайная строка минимум 32 символа), `TEACHER_INVITE_CODE`, `APP_URL`. Модель по умолчанию — `openai/gpt-oss-20b`. Ключ Groq не совместим с прежним Mistral endpoint. Модель можно изменить через `GROQ_MODEL` на совместимую модель Groq с JSON mode и reasoning_effort.
+Обязательные параметры: `GROQ_API_KEY`, `SESSION_SECRET` (случайная строка минимум 32 символа), `TEACHER_INVITE_CODE`, `APP_URL`. Модель по умолчанию — `openai/gpt-oss-20b`. Ключ Groq не совместим с прежним Mistral endpoint. Модель можно изменить через `GROQ_MODEL` на совместимую модель Groq со строгой JSON schema и reasoning_effort. В генерации применяется strict schema, после неё дополнительная Zod-проверка. Временная ошибка провайдера 5xx повторяется один раз в пределах общего таймаута; ошибки квоты не повторяются.
 
 Локальные аккаунты создаются только явной командой `setup:local`. Их случайные пароли и приглашение сохраняются в игнорируемом `LOCAL_ACCESS.md`. В исходниках нет универсальных демо-паролей. Не выполняйте bootstrap для публичной базы.
 

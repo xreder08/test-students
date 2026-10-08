@@ -46,7 +46,9 @@ test('teacher uploads a book; student reads, learns with real AI, tests and resu
   await sp.getByRole('button',{name:'Объясни проще'}).click();
   const realTutor=await tutorResponse;expect(realTutor.status()).toBe(200);const tutorData=await realTutor.json();expect(tutorData.answer.length).toBeGreaterThan(80);
   await expect(sp.locator('.chat-message.assistant')).toBeVisible();
+  const generationResponse=sp.waitForResponse(r=>r.url().endsWith('/api/tests/generate')&&r.request().method()==='POST');
   await sp.getByRole('button',{name:'Глава изучена',exact:true}).click();
+  const generated=await generationResponse;expect(generated.status(),JSON.stringify(await generated.json())).toBe(201);
   await expect(sp.locator('.question-card')).toBeVisible({timeout:65000});
   const attemptId=new URL(sp.url()).searchParams.get('attempt')!;
   const activeBefore=await (await student.request.get(`/api/attempts/${attemptId}`)).json();
