@@ -16,7 +16,7 @@ test('teacher uploads a large textbook in browser and downloads the exact origin
     const page = await context.newPage();
     await page.goto('/');
     await page.getByRole('button', {name:'Добавить книгу',exact:true}).click();
-    await expect(page.getByText('PDF с текстом, EPUB, DOCX, TXT, MD · до 100 МБ')).toBeVisible();
+    await expect(page.getByText('PDF, включая сканы, EPUB, DOCX, TXT, MD · до 100 МБ')).toBeVisible();
     const original = Buffer.from('# Глава 1. Большой учебник\n' + 'Учебный материал о натуральных числах.\n'.repeat(80000));
     expect(original.length).toBeGreaterThan(4*1024*1024);
     await page.getByLabel('Файл книги').setInputFiles({name:'large-textbook.txt',mimeType:'text/plain',buffer:original});

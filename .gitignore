@@ -10,3 +10,4 @@ test-results/
 *.tsbuildinfo
 coverage/
 LOCAL_ACCESS.md
+public/ocr/

@@ -66,7 +66,7 @@ export function splitChapters(text: string): {title: string; content: string}[] 
   return chunks;
 }
 
-export async function extractBook(file: File) {
+export async function extractBook(file: File, recognizedText?: string) {
   if (file.size > MAX_BOOK_BYTES || file.size === 0) throw new AppError(`Выберите книгу размером до ${MAX_BOOK_MB} МБ.`);
   const extension = file.name.split('.').pop()?.toLowerCase();
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -75,6 +75,10 @@ export async function extractBook(file: File) {
     text = new TextDecoder('utf-8', {fatal: true}).decode(buffer);
   } else if (extension === 'pdf') {
     if (!buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new AppError('Файл не является PDF.');
+    if (recognizedText !== undefined) {
+      if (recognizedText.length > MAX_BOOK_TEXT) throw new AppError('В книге больше 10 миллионов символов текста.');
+      return {buffer, format: extension, chapters: splitChapters(recognizedText)};
+    }
     const { PDFParse } = await import('pdf-parse');
     const parser = new PDFParse({data: buffer});
     try {
@@ -123,9 +127,9 @@ export async function getChapter(id: string, userId: string): Promise<Chapter & 
   if (!result.rows[0]) throw new AppError('Глава не найдена',404);
   return {...result.rows[0],studied: Boolean(result.rows[0].studied)} as unknown as Chapter & {bookTitle: string; ownerId: string | null; grade: number};
 }
-export async function saveBook(user: User, metadata: {title: string; subject: string; grade: number}, file: File) {
+export async function saveBook(user: User, metadata: {title: string; subject: string; grade: number}, file: File, recognizedText?:string) {
   let extracted: Awaited<ReturnType<typeof extractBook>>;
-  try { extracted = await extractBook(file); }
+  try { extracted = await extractBook(file, recognizedText); }
   catch (error) { if (error instanceof AppError) throw error; throw new AppError('Не удалось прочитать книгу. Проверьте формат, кодировку UTF-8 и наличие текста.'); }
   const id = newId();
   await initDb();

@@ -7,7 +7,7 @@ import { database, newId, query } from '@/lib/db';
 import { getChapter, listBooks, saveBook } from '@/lib/books';
 import { tutor } from '@/lib/ai';
 import { createTest, startAttempt, updateAttempt } from '@/lib/testing';
-import { MAX_UPLOAD_BODY_BYTES } from '@/lib/book-limits';
+import { MAX_UPLOAD_BODY_BYTES, MAX_BOOK_TEXT } from '@/lib/book-limits';
 import { readBookForm } from '@/lib/upload';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,7 +71,9 @@ async function handle(request: Request, context: Context) {
         const file = data.get('file');
         if (!(file instanceof File)) throw new AppError('Выберите файл книги');
         const metadata = z.object({title:z.string().trim().min(2).max(150),subject:z.string().trim().min(2).max(80),grade:z.coerce.number().int().min(1).max(12)}).parse({title:data.get('title'),subject:data.get('subject'),grade:data.get('grade')});
-        return reply({id:await saveBook(user,metadata,file)},201);
+        const rawText = data.get('recognizedText');
+        const recognizedText = rawText === null ? undefined : z.string().max(MAX_BOOK_TEXT).parse(rawText);
+        return reply({id:await saveBook(user,metadata,file,recognizedText)},201);
       }
       const id = idSchema.parse(path[1]);
       const book = (await query('SELECT id,owner_id,title,source_name,format FROM books WHERE id=?',[id])).rows[0];

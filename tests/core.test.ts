@@ -90,3 +90,13 @@ test('upload stream enforces actual byte limit without a Content-Length header',
   assert(cancelled);
   assert(supplied <= MAX_UPLOAD_BODY_BYTES+2*chunk.length);
 });
+
+test('reviewed PDF OCR text is validated and becomes readable chapters',async()=>{
+  const pdf = new File(['%PDF-1.4\nimage-only fixture'], 'scan.pdf');
+  const text = '# Страница 1\n\n' + 'Натуральные числа используются для счёта предметов. '.repeat(5);
+  const result = await extractBook(pdf, text);
+  assert.equal(result.chapters[0].title, 'Страница 1');
+  assert(result.chapters[0].content.includes('Натуральные числа'));
+  await assert.rejects(()=>extractBook(pdf, 'нет текста'));
+  await assert.rejects(()=>extractBook(new File(['fake'], 'scan.pdf'),text));
+});
