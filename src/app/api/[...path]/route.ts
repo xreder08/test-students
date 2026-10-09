@@ -7,6 +7,8 @@ import { database, newId, query } from '@/lib/db';
 import { getChapter, listBooks, saveBook } from '@/lib/books';
 import { tutor } from '@/lib/ai';
 import { createTest, startAttempt, updateAttempt } from '@/lib/testing';
+import { MAX_UPLOAD_BODY_BYTES } from '@/lib/book-limits';
+import { readBookForm } from '@/lib/upload';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -19,7 +21,9 @@ async function handle(request: Request, context: Context) {
     const {path} = await context.params;
     const method = request.method;
     if (method !== 'GET') checkOrigin(request);
-    if (method !== 'GET' && Number(request.headers.get('content-length') || 0) > 4.2*1024*1024) throw new AppError('Запрос слишком большой',413);
+    const bookUpload = method === 'POST' && path.length === 1 && path[0] === 'books';
+    const bodyLimit = bookUpload ? MAX_UPLOAD_BODY_BYTES : 1024 * 1024;
+    if (method !== 'GET' && Number(request.headers.get('content-length') || 0) > bodyLimit) throw new AppError('Запрос слишком большой',413);
 
     if (path[0] === 'auth') {
       if (method === 'GET') return reply({user:await sessionUser()});
@@ -63,7 +67,7 @@ async function handle(request: Request, context: Context) {
       if (path.length === 1 && method === 'GET') return reply({books:await listBooks(user)});
       if (path.length === 1 && method === 'POST') {
         await requireUser('teacher'); await rateLimit(`upload:${user.id}`,8,3600);
-        const data = await request.formData();
+        const data = await readBookForm(request);
         const file = data.get('file');
         if (!(file instanceof File)) throw new AppError('Выберите файл книги');
         const metadata = z.object({title:z.string().trim().min(2).max(150),subject:z.string().trim().min(2).max(80),grade:z.coerce.number().int().min(1).max(12)}).parse({title:data.get('title'),subject:data.get('subject'),grade:data.get('grade')});

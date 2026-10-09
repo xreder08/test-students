@@ -2,6 +2,7 @@ import { AppError } from './errors';
 import { database, initDb, newId, query } from './db';
 import type { Book, Chapter, User } from './types';
 import { Unzip, UnzipInflate } from 'fflate';
+import { MAX_BOOK_BYTES, MAX_BOOK_MB, MAX_BOOK_TEXT, MAX_BOOK_CHAPTERS, MAX_ARCHIVE_TEXT_BYTES } from './book-limits';
 
 export function decodeEntities(text: string) {
   return text.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#\d+|#x[\da-f]+);/gi, entity => {
@@ -22,7 +23,7 @@ export function extractArchive(buffer: Uint8Array, accept: (name: string) => boo
     file.ondata = (error,data,final) => {
       if (error) throw new AppError('Повреждённый архив книги.');
       total += data.length;
-      if (total > 12*1024*1024) {file.terminate();throw new AppError('Распакованная книга слишком большая.');}
+      if (total > MAX_ARCHIVE_TEXT_BYTES) {file.terminate();throw new AppError('Объём распакованного текста книги превышает 64 МБ.');}
       chunks.push(data);
       if (final) files.set(file.name,Buffer.concat(chunks).toString('utf8'));
     };
@@ -39,7 +40,7 @@ function markupText(markup: string) {
 export function splitChapters(text: string): {title: string; content: string}[] {
   const normalized = text.replace(/\r\n?/g, '\n').replace(/\0/g, '').trim();
   if (normalized.length < 150) throw new AppError('В книге слишком мало текста. Для скана PDF нужен файл с распознанным текстом.');
-  if (normalized.length > 1000000) throw new AppError('Слишком большая книга. Разделите её на несколько файлов.');
+  if (normalized.length > MAX_BOOK_TEXT) throw new AppError('В книге больше 10 миллионов символов текста. Разделите её на тома.');
   const lines = normalized.split('\n');
   const chunks: {title: string; content: string}[] = [];
   let title = 'Введение', buffer: string[] = [];
@@ -61,12 +62,12 @@ export function splitChapters(text: string): {title: string; content: string}[] 
     } else buffer.push(line);
   }
   flush();
-  if (!chunks.length || chunks.length > 200) throw new AppError('Не удалось разделить книгу: нужно от 1 до 200 глав.');
+  if (!chunks.length || chunks.length > MAX_BOOK_CHAPTERS) throw new AppError(`Не удалось разделить книгу: нужно от 1 до ${MAX_BOOK_CHAPTERS} глав.`);
   return chunks;
 }
 
 export async function extractBook(file: File) {
-  if (file.size > 4 * 1024 * 1024 || file.size === 0) throw new AppError('Выберите книгу размером до 4 МБ.');
+  if (file.size > MAX_BOOK_BYTES || file.size === 0) throw new AppError(`Выберите книгу размером до ${MAX_BOOK_MB} МБ.`);
   const extension = file.name.split('.').pop()?.toLowerCase();
   const buffer = Buffer.from(await file.arrayBuffer());
   let text = '';

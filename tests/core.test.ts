@@ -5,6 +5,8 @@ import { splitChapters, extractBook, extractArchive } from '../src/lib/books';
 import { generatedTestSchema, authSchema } from '../src/lib/validation';
 import { hashPassword, verifyPassword } from '../src/lib/auth';
 import { shuffleQuestions, scoreQuestions } from '../src/lib/testing';
+import { MAX_ARCHIVE_TEXT_BYTES, MAX_BOOK_BYTES, MAX_UPLOAD_BODY_BYTES } from '../src/lib/book-limits';
+import { readBookForm } from '../src/lib/upload';
 
 test('passwords are salted and verified without storing plaintext',async()=>{
   const first=await hashPassword('SomePassword123!'),second=await hashPassword('SomePassword123!');
@@ -42,7 +44,7 @@ test('DOCX reads text without including external relationships',async()=>{
   assert(result.chapters[0].content.includes('Числа используются'));assert(!result.chapters[0].content.includes('https://'));
 });
 test('archive inflation is bounded to prevent compressed document bombs',()=>{
-  const zip=zipSync({'word/document.xml':new Uint8Array(13*1024*1024)});
+  const zip=zipSync({'word/document.xml':new Uint8Array(MAX_ARCHIVE_TEXT_BYTES+1)});
   assert.throws(()=>extractArchive(zip,name=>name==='word/document.xml'));
 });
 test('EPUB follows spine order rather than archive file order',async()=>{
@@ -59,6 +61,32 @@ test('PDF uploads extract real document text and reject forged signatures',async
   let pdf='%PDF-1.4\n';const offsets=[0];
   objects.forEach((object,i)=>{offsets.push(Buffer.byteLength(pdf));pdf+=`${i+1} 0 obj\n${object}\nendobj\n`;});
   const xref=Buffer.byteLength(pdf);pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(o=>String(o).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  const result=await extractBook(new File([pdf],'lesson.pdf'));assert(result.chapters[0].content.includes('Natural numbers count objects'));
+  // Images often make a textbook large even when its extracted text is short.
+  const result=await extractBook(new File([pdf, '\n%'+ ' '.repeat(5*1024*1024)],'lesson.pdf'));assert(result.buffer.length>4*1024*1024);assert(result.chapters[0].content.includes('Natural numbers count objects'));
   await assert.rejects(()=>extractBook(new File(['fake'],'fake.pdf')));
+});
+
+test('large textbooks exceed old file, text and chapter limits without losing text',async()=>{
+  const text = '# Глава 1. Большая книга\n' + 'Учебный материал о натуральных числах.\n'.repeat(80000);
+  const file = new File([text], 'large.txt');
+  assert(file.size > 4*1024*1024);
+  const result = await extractBook(file);
+  assert(result.chapters.length > 200);
+  assert(result.chapters.every(chapter => chapter.content.length <= 12000));
+  assert.equal(result.chapters.map(chapter=>chapter.content).join('\n'), text.split('\n').slice(1).join('\n').trim());
+  // Reject before reading the body, including a malformed synthetic File.
+  await assert.rejects(()=>extractBook({size:MAX_BOOK_BYTES+1} as File), /100 МБ/);
+});
+
+test('upload stream enforces actual byte limit without a Content-Length header',async()=>{
+  let cancelled = false, supplied = 0;
+  const chunk = new Uint8Array(1024*1024);
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) { supplied += chunk.length; controller.enqueue(chunk); },
+    cancel() { cancelled = true; },
+  });
+  const request = new Request('http://localhost/api/books', {method:'POST',body,duplex:'half'} as RequestInit);
+  await assert.rejects(()=>readBookForm(request), /100 МБ/);
+  assert(cancelled);
+  assert(supplied <= MAX_UPLOAD_BODY_BYTES+2*chunk.length);
 });
