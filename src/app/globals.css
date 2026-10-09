@@ -11,3 +11,5 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}.spin{animation-duration:2s}}
 
 .ocr-options { margin: 18px 0; } .ocr-checkbox { display:flex !important; flex-direction:row !important; align-items:flex-start; gap:10px; font-size:13px; font-weight:400; } .ocr-checkbox input { width:18px; min-width:18px; height:18px; margin:0; } .ocr-progress { display:flex; gap:10px; align-items:center; margin:16px 0; color:var(--blue); font-size:14px; } .ocr-preview { padding:14px; margin:16px 0; border:1px solid var(--border); border-radius:12px; font-size:14px; } .ocr-preview summary { cursor:pointer; margin:12px 0; } .ocr-preview textarea { width:100%; font-size:14px; resize:vertical; }
+
+.chapter-panel { min-width:0; } .chapter-panel nav { max-height:max(160px,calc(100dvh - 340px)); overflow:auto; overscroll-behavior:contain; } .chapter-item { flex-shrink:0; }

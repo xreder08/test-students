@@ -1,5 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {createClient} from '@libsql/client';
+import {zipSync,strToU8} from 'fflate';
 
 function imagePdf(jpeg:Buffer) {
   // An original test fixture containing only a page image, no PDF text layer.
@@ -12,12 +13,12 @@ function imagePdf(jpeg:Buffer) {
   return Buffer.concat(parts);
 }
 
-test('image-only Russian PDF is OCRed locally, reviewed, saved and used by the tutor',async({browser})=>{
+test('scanned PDF and mixed EPUB are OCRed locally in page order and become readable books',async({browser})=>{
   test.setTimeout(150000);
   const origin='http://127.0.0.1:3000',email=`teacher-scan-${Date.now()}@example.test`;
   const context=await browser.newContext();
   const client=createClient({url:process.env.DATABASE_URL!});
-  let bookId:string|undefined;
+  let bookId:string|undefined,epubId:string|undefined;
   try {
     const registration=await context.request.post('/api/auth',{headers:{Origin:origin},data:{action:'register',email,name:'Скан учебника',password:'ScannedBookPassword123!',role:'teacher',inviteCode:process.env.TEACHER_INVITE_CODE}});
     expect(registration.status()).toBe(200);
@@ -63,7 +64,25 @@ test('image-only Russian PDF is OCRed locally, reviewed, saved and used by the t
     const download=await context.request.get(`/api/books/${bookId}/file`);expect((await download.body()).equals(original)).toBeTruthy();
     expect(errors).toEqual([]);expect(externalRequests).toEqual([]);
     await page.screenshot({path:'test-results/scanned-reader.png',fullPage:true});
+    await page.goto('/?view=library');
+    await page.getByRole('button',{name:'Добавить книгу',exact:true}).click();
+    const native='Сложение объединяет количество предметов. Два плюс два равно четыре. '.repeat(5);
+    const epub=zipSync({'OPS/two.xhtml':strToU8(`<html><head><title>Ignore metadata</title></head><body><h1>Сложение</h1><p>${native}</p></body></html>`),'OPS/one.xhtml':strToU8('<html><body><img src="images/scan.jpg"/></body></html>'),'OPS/images/scan.jpg':Buffer.from(image,'base64'),'OPS/content.opf':strToU8('<package><manifest><item id="one" href="one.xhtml"/><item id="two" href="two.xhtml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>')});
+    await page.getByLabel('Файл книги').setInputFiles({name:'mixed-scans.epub',mimeType:'application/epub+zip',buffer:Buffer.from(epub)});
+    await page.getByLabel('Название книги',{exact:true}).fill('EPUB с картинками E2E');
+    await page.getByLabel('Предмет',{exact:true}).fill('Математика');
+    await page.getByRole('button',{name:'Прочитать и распознать EPUB'}).click();
+    await expect(page.getByRole('button',{name:'Сохранить книгу',exact:true})).toBeVisible({timeout:30000});
+    await expect(page.locator('.ocr-preview')).toContainText('Обработано страниц: 2. Распознано сканов: 1.');
+    const epubUpload=page.waitForResponse(response=>response.url().endsWith('/api/books')&&response.request().method()==='POST');
+    await page.getByRole('button',{name:'Сохранить книгу',exact:true}).click();
+    const epubResponse=await epubUpload;expect(epubResponse.status(),await epubResponse.text()).toBe(201);epubId=(await epubResponse.json()).id;
+    await expect(page.locator('.chapter-text')).toContainText('Натуральные числа');
+    const epubDetails=await (await context.request.get(`/api/books/${epubId}`)).json();expect(epubDetails.chapters).toHaveLength(2);expect(epubDetails.chapters[0].title).toBe('Страница 1');expect(epubDetails.chapters[1].title).toBe('Сложение');
+    const second=await (await context.request.get(`/api/chapters/${epubDetails.chapters[1].id}`)).json();expect(second.chapter.content).toContain(native.trim());expect(second.chapter.content).not.toContain('Ignore metadata');
+    expect(externalRequests).toEqual([]);
   } finally {
+    if(epubId)await context.request.delete(`/api/books/${epubId}`,{headers:{Origin:origin}});
     if(bookId)await context.request.delete(`/api/books/${bookId}`,{headers:{Origin:origin}});
     const user=(await client.execute({sql:'SELECT id FROM users WHERE email=?',args:[email]})).rows[0];
     if(user)await client.batch([{sql:'DELETE FROM sessions WHERE user_id=?',args:[user.id]},{sql:'DELETE FROM users WHERE id=?',args:[user.id]}],'write');

@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword } from '../src/lib/auth';
 import { shuffleQuestions, scoreQuestions } from '../src/lib/testing';
 import { MAX_ARCHIVE_TEXT_BYTES, MAX_BOOK_BYTES, MAX_UPLOAD_BODY_BYTES } from '../src/lib/book-limits';
 import { readBookForm } from '../src/lib/upload';
+import {epubSections,resolveEpubPath,readEpubArchive} from '../src/lib/epub';
 
 test('passwords are salted and verified without storing plaintext',async()=>{
   const first=await hashPassword('SomePassword123!'),second=await hashPassword('SomePassword123!');
@@ -99,4 +100,26 @@ test('reviewed PDF OCR text is validated and becomes readable chapters',async()=
   assert(result.chapters[0].content.includes('Натуральные числа'));
   await assert.rejects(()=>extractBook(pdf, 'нет текста'));
   await assert.rejects(()=>extractBook(new File(['fake'], 'scan.pdf'),text));
+});
+
+test('scanned EPUB reports OCR requirement and accepts reviewed page text',async()=>{
+  const zip=zipSync({'OPS/content.opf':strToU8('<package><manifest><item id="p" href="page.xhtml"/></manifest><spine><itemref idref="p"/></spine></package>'),'OPS/page.xhtml':strToU8('<html><head><title>1</title></head><body><img src="images/page.jpg"/></body></html>')});
+  const file=new File([zip as unknown as BlobPart],'scan.epub');
+  await assert.rejects(()=>extractBook(file),/страницы-картинки/);
+  const result=await extractBook(file,'# Страница 1\n'+ 'Натуральные числа используются для счёта. '.repeat(6));
+  assert.equal(result.chapters.length,1);assert(result.chapters[0].content.includes('Натуральные числа'));
+});
+
+test('EPUB container, namespaced manifest and relative image references preserve spine order',()=>{
+  const files=new Map([
+    ['META-INF/container.xml','<container><rootfile full-path="OPS/book.opf"/></container>'],
+    ['wrong.opf','<invalid/>'],
+    ['OPS/book.opf','<opf:package><opf:manifest><opf:item id="one" href="Text/one.xhtml"/><opf:item id="two" href="Text/two.xhtml"/></opf:manifest><opf:spine><opf:itemref idref="two"/><opf:itemref idref="one"/></opf:spine></opf:package>'],
+    ['OPS/Text/one.xhtml','<html><head><title>Ignore me</title></head><body><img src="../Images/first%20page.jpg"/></body></html>'],
+    ['OPS/Text/two.xhtml','<html><body><svg><image xlink:href="../Images/two.jpg"/></svg><img src="https://example.com/private.jpg"/></body></html>'],
+  ]);
+  const sections=epubSections(files);assert.equal(sections[0].path,'OPS/Text/two.xhtml');assert.deepEqual(sections[0].images,['OPS/Images/two.jpg']);assert.deepEqual(sections[1].images,['OPS/Images/first page.jpg']);assert.equal(sections[1].text,'');
+  assert.equal(resolveEpubPath('OPS/one.xhtml','https://example.com/x.jpg'),undefined);
+  const zip=zipSync({'OPS/large.jpg':new Uint8Array(26*1024*1024)});
+  assert.throws(()=>readEpubArchive(zip),/безопасный объём/);
 });

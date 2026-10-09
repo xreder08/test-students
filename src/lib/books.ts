@@ -3,6 +3,7 @@ import { database, initDb, newId, query } from './db';
 import type { Book, Chapter, User } from './types';
 import { Unzip, UnzipInflate } from 'fflate';
 import { MAX_BOOK_BYTES, MAX_BOOK_MB, MAX_BOOK_TEXT, MAX_BOOK_CHAPTERS, MAX_ARCHIVE_TEXT_BYTES } from './book-limits';
+import { epubSections } from './epub';
 
 export function decodeEntities(text: string) {
   return text.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#\d+|#x[\da-f]+);/gi, entity => {
@@ -92,29 +93,17 @@ export async function extractBook(file: File, recognizedText?: string) {
     text = markupText(files.get('word/document.xml')!);
   } else if (extension === 'epub') {
     const files = extractArchive(buffer,name => /\.(?:xhtml|html|htm|opf|xml)$/i.test(name));
-    const opfEntry = [...files].find(([name]) => name.endsWith('.opf'));
-    if (!opfEntry) throw new AppError('В EPUB не найдено оглавление.');
-    const [opfPath,opf] = opfEntry;
-    const directory = opfPath.slice(0,opfPath.lastIndexOf('/')+1);
-    const manifest = new Map<string,string>();
-    for (const match of opf.matchAll(/<item\b([^>]+)\/?\s*>/gi)) {
-      const attributes = match[1];
-      const id = attributes.match(/\bid=["']([^"']+)["']/)?.[1];
-      const href = attributes.match(/\bhref=["']([^"']+)["']/)?.[1];
-      if (id && href && /\.(?:xhtml|html|htm)$/i.test(href)) manifest.set(id,decodeEntities(href));
-    }
-    const sections: string[] = [];
-    for (const match of opf.matchAll(/<itemref\b[^>]*\bidref=["']([^"']+)["'][^>]*>/gi)) {
-      const href = manifest.get(match[1]);
-      if (!href) continue;
-      const path = new URL(href,'https://book.invalid/'+directory).pathname.slice(1);
-      const html = files.get(decodeURIComponent(path));
-      if (html) {
-        const heading = html.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)?.[1];
-        sections.push(`# ${heading?markupText(heading):`Глава ${sections.length+1}`}\n\n${markupText(html)}`);
+    let sections:ReturnType<typeof epubSections>;
+    try {sections=epubSections(files);} catch(error) {throw new AppError((error as Error).message);}
+    if(recognizedText!==undefined) {
+      if(recognizedText.length>MAX_BOOK_TEXT)throw new AppError('В книге больше 10 миллионов символов текста.');
+      text=recognizedText;
+    } else {
+      if(sections.some(section=>section.images.length&&section.text.replace(/[^\p{L}]/gu,'').length<100)) {
+        throw new AppError('В EPUB есть страницы-картинки. Добавьте книгу через форму распознавания EPUB, чтобы получить текст.');
       }
+      text=sections.map(section=>`# ${section.title}\n\n${section.text}`).join('\n\n');
     }
-    text = sections.join('\n\n');
   } else throw new AppError('Поддерживаются PDF с текстом, EPUB, DOCX, TXT и Markdown.');
   return {buffer, format: extension, chapters: splitChapters(text)};
 }

@@ -12,6 +12,8 @@ export function UploadDialog({onClose,onSaved}:{onClose:()=>void;onSaved:(id:str
   const processing=useRef<AbortController|null>(null);
   useEffect(()=>()=>processing.current?.abort(),[]);
   const pdf=file?.name.toLowerCase().endsWith('.pdf');
+  const epub=file?.name.toLowerCase().endsWith('.epub');
+  const needsReading=pdf||epub;
   function select(selected:File|undefined) {
     if(busy||!selected)return;
     setPreview(null);setProgress('');
@@ -24,11 +26,11 @@ export function UploadDialog({onClose,onSaved}:{onClose:()=>void;onSaved:(id:str
     const data=new FormData(event.currentTarget);
     setBusy(true);setError('');
     try {
-      if(pdf&&!preview) {
+      if(needsReading&&!preview) {
         const controller=new AbortController();processing.current=controller;
-        setProgress('Открываем PDF…');
-        const {recognizePdf}=await import('@/lib/pdf-ocr');
-        const result=await recognizePdf(file,language.split('+'),force,setProgress,controller.signal);
+        setProgress(pdf?'Открываем PDF…':'Открываем EPUB…');
+        const recognize=pdf?(await import('@/lib/pdf-ocr')).recognizePdf:(await import('@/lib/epub-ocr')).recognizeEpub;
+        const result=await recognize(file,language.split('+'),force,setProgress,controller.signal);
         setPreview(result);setProgress('Текст готов. Проверьте его и сохраните книгу.');
         return;
       }
@@ -52,13 +54,13 @@ export function UploadDialog({onClose,onSaved}:{onClose:()=>void;onSaved:(id:str
       </label>
       <label>Название книги<input name="title" value={title} disabled={busy} onChange={event=>setTitle(event.target.value)} required minLength={2} maxLength={150} placeholder="Например, Математика. 5 класс"/></label>
       <div className="form-row"><label>Предмет<input name="subject" disabled={busy} required minLength={2} maxLength={80} placeholder="Математика"/></label><label>Класс<select name="grade" disabled={busy} defaultValue="5">{Array.from({length:12},(_,i)=><option value={i+1} key={i}>{i+1} класс</option>)}</select></label></div>
-      {pdf&&<div className="ocr-options"><label>Язык книги<select value={language} disabled={busy} onChange={event=>{setLanguage(event.target.value);setPreview(null);}}><option value="rus+eng">Русский и английский</option><option value="kaz+rus+eng">Казахский, русский и английский</option><option value="eng">Английский</option></select></label><label className="ocr-checkbox"><input type="checkbox" checked={force} disabled={busy} onChange={event=>{setForce(event.target.checked);setPreview(null);}}/>Распознать все страницы заново, даже если в PDF уже есть текст</label></div>}
-      <div className="upload-info"><Sparkles size={19}/><p>{pdf?'Распознаём фотографии страниц прямо в браузере. Оставьте вкладку открытой: большой учебник может обрабатываться несколько минут.':'Книга разделится на главы. Ученики смогут читать её здесь, задавать вопросы и получать тест после изучения главы.'}</p></div>
+      {needsReading&&<div className="ocr-options"><label>Язык книги<select value={language} disabled={busy} onChange={event=>{setLanguage(event.target.value);setPreview(null);}}><option value="rus+eng">Русский и английский</option><option value="kaz+rus+eng">Казахский, русский и английский</option><option value="eng">Английский</option></select></label><label className="ocr-checkbox"><input type="checkbox" checked={force} disabled={busy} onChange={event=>{setForce(event.target.checked);setPreview(null);}}/>Распознать все изображения заново, даже если в книге уже есть текст</label></div>}
+      <div className="upload-info"><Sparkles size={19}/><p>{needsReading?'Распознаём фотографии страниц прямо в браузере. Оставьте вкладку открытой: большой учебник может обрабатываться несколько минут.':'Книга разделится на главы. Ученики смогут читать её здесь, задавать вопросы и получать тест после изучения главы.'}</p></div>
       {progress&&<div className="ocr-progress" role="status" aria-live="polite">{busy&&<LoaderCircle size={18} className="spin"/>}{progress}</div>}
       {preview&&<div className="ocr-preview"><p>Обработано страниц: <strong>{preview.pages}</strong>. Распознано сканов: <strong>{preview.ocrPages}</strong>.{preview.unreadablePages>0&&` Без читаемого текста: ${preview.unreadablePages}.`}</p><p className="small muted">Проверьте формулы, дроби и таблицы: распознавание может ошибаться. Можно исправить текст перед сохранением. Страницы станут разделами для чтения и ИИ-обучения.</p><details><summary>Проверить и исправить текст книги</summary><textarea aria-label="Распознанный текст книги" value={preview.text} maxLength={MAX_BOOK_TEXT} rows={10} disabled={busy} onChange={event=>setPreview({...preview,text:event.target.value})}/></details></div>}
       <p className="small muted">Добавляйте материалы, которые вы вправе использовать. Страницы не отправляются стороннему сервису распознавания.</p>
       {error&&<div className="form-error" role="alert">{error}</div>}
-      <div className="modal-actions"><button type="button" className="btn secondary" disabled={busy&&!processing.current} onClick={()=>busy?processing.current?.abort():onClose()}>{busy?'Отменить обработку':'Отмена'}</button><button className="btn primary" disabled={busy}>{busy?<LoaderCircle className="spin"/>:<Plus size={18}/>} {busy?'Обрабатываем…':preview?'Сохранить книгу':pdf?'Прочитать и распознать PDF':'Добавить в библиотеку'}</button></div>
+      <div className="modal-actions"><button type="button" className="btn secondary" disabled={busy&&!processing.current} onClick={()=>busy?processing.current?.abort():onClose()}>{busy?'Отменить обработку':'Отмена'}</button><button className="btn primary" disabled={busy}>{busy?<LoaderCircle className="spin"/>:<Plus size={18}/>} {busy?'Обрабатываем…':preview?'Сохранить книгу':pdf?'Прочитать и распознать PDF':epub?'Прочитать и распознать EPUB':'Добавить в библиотеку'}</button></div>
     </form>
   </section></div>;
 }
