@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/core.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "setup:local": "node --env-file=.env.local --import tsx scripts/bootstrap.ts",
     "check:secrets": "node scripts/check-secrets.mjs"

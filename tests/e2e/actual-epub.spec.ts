@@ -17,7 +17,7 @@ test('actual image-based EPUB is recognized in full and becomes an AI learning b
     if(!bookId) {
     await page.getByRole('button',{name:'Добавить книгу',exact:true}).click();
     await page.getByLabel('Файл книги').setInputFiles(process.env.EDUTEST_EPUB_TEST_FILE!);
-    await page.getByLabel('Название книги',{exact:true}).fill('Математика. 5 класс. Часть 1');
+    await page.getByLabel('Название книги',{exact:true}).fill(process.env.EDUTEST_EPUB_TEST_TITLE||'Математика. 5 класс. Часть 1');
     await page.getByLabel('Предмет',{exact:true}).fill('Математика');
     await page.getByRole('button',{name:'Прочитать и распознать EPUB'}).click();
     timer=setInterval(()=>{void page.locator('.ocr-progress').textContent().then(value=>{if(value)console.log(value);}).catch(()=>{});},15000);

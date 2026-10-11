@@ -1,25 +1,13 @@
 import { AppError } from './errors';
 import { MAX_UPLOAD_BODY_BYTES } from './book-limits';
+import {readBoundedBody} from './request-body';
 
 // Check actual bytes too: Content-Length can be absent or untrusted.
 export async function readBookForm(request: Request) {
   if (!request.body) throw new AppError('Выберите файл книги');
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_UPLOAD_BODY_BYTES) {
-        await reader.cancel();
-        throw new AppError('Книга превышает лимит 100 МБ.', 413);
-      }
-      chunks.push(value);
-    }
-  } finally { reader.releaseLock(); }
-  return new Response(Buffer.concat(chunks) as unknown as BodyInit, {
+  const bytes=await readBoundedBody(request,MAX_UPLOAD_BODY_BYTES,'Книга превышает лимит 100 МБ.');
+  if(!/^multipart\/form-data\s*;/i.test(request.headers.get('content-type')||''))throw new AppError('Для загрузки книги требуется multipart/form-data.',415);
+  try {return await new Response(bytes as unknown as BodyInit, {
     headers: {'Content-Type': request.headers.get('content-type') || ''},
-  }).formData();
+  }).formData();}catch{throw new AppError('Повреждённая форма загрузки книги.',400);}
 }

@@ -47,7 +47,7 @@ export function splitChapters(text: string): {title: string; content: string}[] 
   let title = 'Введение', buffer: string[] = [];
   const flush = () => {
     const body = buffer.join('\n').trim();
-    if (body.length < 30) return;
+    if (!body.length) return;
     if (body.length <= 12000) { chunks.push({title, content: body}); return; }
     let remaining = body, part = 1;
     while (remaining.length) {
@@ -99,7 +99,7 @@ export async function extractBook(file: File, recognizedText?: string) {
       if(recognizedText.length>MAX_BOOK_TEXT)throw new AppError('В книге больше 10 миллионов символов текста.');
       text=recognizedText;
     } else {
-      if(sections.some(section=>section.images.length&&section.text.replace(/[^\p{L}]/gu,'').length<100)) {
+      if(sections.some(section=>section.images.length&&section.text.replace(/[^\p{L}\p{N}]/gu,'').length<100)) {
         throw new AppError('В EPUB есть страницы-картинки. Добавьте книгу через форму распознавания EPUB, чтобы получить текст.');
       }
       text=sections.map(section=>`# ${section.title}\n\n${section.text}`).join('\n\n');

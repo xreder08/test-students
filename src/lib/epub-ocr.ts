@@ -17,7 +17,7 @@ export async function recognizeEpub(file:File,languages:string[],force:boolean,o
     for(const page of pages) {
       check();current++;onProgress(`Читаем страницу EPUB ${current} из ${pages.length}…`);
       let text=page.text;
-      if(page.images.length&&(force||(text.match(/\p{L}/gu)||[]).length<100)) {
+      if(page.images.length&&(force||(text.match(/[\p{L}\p{N}]/gu)||[]).length<100)) {
         if(!worker) {
           const {createWorker,OEM}=await import('tesseract.js');
           worker=await createWorker(languages,OEM.LSTM_ONLY,{workerPath:'/ocr/worker.min.js',corePath:'/ocr',langPath:'/ocr',workerBlobURL:false,
@@ -39,7 +39,7 @@ export async function recognizeEpub(file:File,languages:string[],force:boolean,o
         }
         ocrPages++;
       }
-      if((text.match(/\p{L}/gu)||[]).length<10) {
+      if((text.match(/[\p{L}\p{N}]/gu)||[]).length<10) {
         unreadablePages++;text='[На этой странице не найден читаемый текст. Она может содержать обложку, рисунок или пустую страницу. Смотрите оригинал книги.]';
       }
       const section=`# ${page.title}\n\n${text.trim()}`;totalCharacters+=section.length;

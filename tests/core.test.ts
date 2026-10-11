@@ -8,6 +8,8 @@ import { shuffleQuestions, scoreQuestions } from '../src/lib/testing';
 import { MAX_ARCHIVE_TEXT_BYTES, MAX_BOOK_BYTES, MAX_UPLOAD_BODY_BYTES } from '../src/lib/book-limits';
 import { readBookForm } from '../src/lib/upload';
 import {epubSections,resolveEpubPath,readEpubArchive} from '../src/lib/epub';
+import {readJson,MAX_JSON_BODY_BYTES} from '../src/lib/request-body';
+import {checkRoute} from '../src/lib/api-routes';
 
 test('passwords are salted and verified without storing plaintext',async()=>{
   const first=await hashPassword('SomePassword123!'),second=await hashPassword('SomePassword123!');
@@ -30,6 +32,8 @@ test('chapter extraction preserves content and splits long chapters on boundarie
   const chapters=splitChapters(text);assert.equal(chapters.length,2);assert.equal(chapters[1].title,'Глава 2. Сложение');
   assert(splitChapters('Очень длинный учебный материал.\n\n'.repeat(1000)).every(c=>c.content.length<=12000));
   assert.throws(()=>splitChapters('Нет текста'));
+  const short=splitChapters('# Глава 1. Теория\n'+ 'Учебный материал для проверки сохранности. '.repeat(5)+'\n# Глава 2. Формула\n2 + 2 = 4');
+  assert.equal(short.length,2);assert.equal(short[1].content,'2 + 2 = 4');
 });
 test('shuffling preserves answer meaning and scoring',()=>{
   const input=[{id:'q1',text:'2+2?',options:['3','4','5','6'],correct:1,explanation:'2+2=4'}];
@@ -122,4 +126,23 @@ test('EPUB container, namespaced manifest and relative image references preserve
   assert.equal(resolveEpubPath('OPS/one.xhtml','https://example.com/x.jpg'),undefined);
   const zip=zipSync({'OPS/large.jpg':new Uint8Array(26*1024*1024)});
   assert.throws(()=>readEpubArchive(zip),/безопасный объём/);
+});
+
+test('JSON parsing validates media, syntax and actual stream size without trusting headers',async()=>{
+  const json=(body:BodyInit,headers:Record<string,string>={'Content-Type':'application/json'})=>new Request('http://localhost/api/auth',{method:'POST',body,headers,duplex:'half'} as RequestInit);
+  await assert.rejects(()=>readJson(json('{')),error=>typeof error==='object'&&error!==null&&'status'in error&&error.status===400);
+  await assert.rejects(()=>readJson(json('{}',{'Content-Type':'text/plain'})),error=>typeof error==='object'&&error!==null&&'status'in error&&error.status===415);
+  let cancelled=false;
+  const chunk=new Uint8Array(MAX_JSON_BODY_BYTES);
+  const stream=new ReadableStream<Uint8Array>({pull(controller){controller.enqueue(chunk);},cancel(){cancelled=true;}});
+  await assert.rejects(()=>readJson(json(stream)),error=>typeof error==='object'&&error!==null&&'status'in error&&error.status===413);assert(cancelled);
+  assert.deepEqual(await readJson(json('{"ok":true}')),{ok:true});
+  await assert.rejects(()=>readBookForm(new Request('http://localhost/api/books',{method:'POST',headers:{'Content-Type':'multipart/form-data; boundary=wrong'},body:'broken'})),/Повреждённая форма/);
+});
+
+test('only exact API routes and supported methods are accepted',()=>{
+  checkRoute(['books','id'],'DELETE');checkRoute(['chapters','id','study'],'POST');
+  assert.throws(()=>checkRoute(['books','id','unexpected'],'DELETE'),error=>typeof error==='object'&&error!==null&&'status'in error&&error.status===404);
+  assert.throws(()=>checkRoute(['auth'],'PUT'),error=>typeof error==='object'&&error!==null&&'status'in error&&error.status===405);
+  assert.throws(()=>checkRoute(['chapters','id','study'],'GET'));
 });

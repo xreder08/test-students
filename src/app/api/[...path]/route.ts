@@ -9,6 +9,8 @@ import { tutor } from '@/lib/ai';
 import { createTest, startAttempt, updateAttempt } from '@/lib/testing';
 import { MAX_UPLOAD_BODY_BYTES, MAX_BOOK_TEXT } from '@/lib/book-limits';
 import { readBookForm } from '@/lib/upload';
+import {readJson} from '@/lib/request-body';
+import {checkRoute} from '@/lib/api-routes';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -21,6 +23,7 @@ async function handle(request: Request, context: Context) {
     const {path} = await context.params;
     const method = request.method;
     if (method !== 'GET') checkOrigin(request);
+    checkRoute(path,method);
     const bookUpload = method === 'POST' && path.length === 1 && path[0] === 'books';
     const bodyLimit = bookUpload ? MAX_UPLOAD_BODY_BYTES : 1024 * 1024;
     if (method !== 'GET' && Number(request.headers.get('content-length') || 0) > bodyLimit) throw new AppError('Запрос слишком большой',413);
@@ -28,7 +31,7 @@ async function handle(request: Request, context: Context) {
     if (path[0] === 'auth') {
       if (method === 'GET') return reply({user:await sessionUser()});
       if (method !== 'POST') throw new AppError('Метод не поддерживается',405);
-      const data = await request.json();
+      const data = z.object({action:z.enum(['login','register','logout'])}).passthrough().parse(await readJson(request));
       if (data.action === 'logout') {await logout(); return reply({ok:true});}
       if (!['login','register'].includes(data.action)) throw new AppError('Неизвестное действие');
       const parsed = authSchema.parse(data);
@@ -41,7 +44,8 @@ async function handle(request: Request, context: Context) {
         if (parsed.role === 'teacher' && (!process.env.TEACHER_INVITE_CODE || !safeEqual(parsed.inviteCode||'',process.env.TEACHER_INVITE_CODE))) throw new AppError('Нужен действующий код приглашения учителя.',403);
         if ((await query('SELECT id FROM users WHERE email=?',[parsed.email])).rows.length) throw new AppError('Этот email уже используется',409);
         const id = newId();
-        await query('INSERT INTO users(id,name,email,password_hash,role,created_at) VALUES(?,?,?,?,?,?)',[id,parsed.name,parsed.email,await hashPassword(parsed.password),parsed.role,new Date().toISOString()]);
+        const created=await query('INSERT INTO users(id,name,email,password_hash,role,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(email) DO NOTHING RETURNING id',[id,parsed.name,parsed.email,await hashPassword(parsed.password),parsed.role,new Date().toISOString()]);
+        if(!created.rows.length)throw new AppError('Этот email уже используется',409);
         await createSession(id);
       } else {
         const user = (await query('SELECT * FROM users WHERE email=?',[parsed.email])).rows[0];
@@ -113,14 +117,14 @@ async function handle(request: Request, context: Context) {
     }
     if (path[0] === 'tutor' && method === 'POST') {
       await rateLimit(`ai:${user.id}`,12,600);
-      const data = tutorSchema.parse(await request.json());
+      const data = tutorSchema.parse(await readJson(request));
       const chapter = await getChapter(data.chapterId,user.id);
       return reply({answer:await tutor(chapter,data.message,data.mode,data.history),source:chapter.title});
     }
     if (path[0] === 'tests') {
       if (method === 'POST' && path[1] === 'manual') {
         await requireUser('teacher');
-        const data = z.object({chapterId:idSchema,title:z.string().trim().min(2).max(150),duration:z.number().int().min(1).max(120),questions:z.array(questionSchema).min(1).max(10)}).parse(await request.json());
+        const data = z.object({chapterId:idSchema,title:z.string().trim().min(2).max(150),duration:z.number().int().min(1).max(120),questions:z.array(questionSchema).min(1).max(10)}).parse(await readJson(request));
         const chapter = await getChapter(data.chapterId,user.id);
         if (chapter.ownerId && chapter.ownerId !== user.id) throw new AppError('Нет доступа к изменению этой книги',403);
         const id = newId();
@@ -136,7 +140,7 @@ async function handle(request: Request, context: Context) {
         return reply({tests:result.rows});
       }
       if (method === 'POST' && path[1] === 'generate') {
-        const data = z.object({chapterId:idSchema,count:z.number().int().min(3).max(10).default(5),duration:z.number().int().min(1).max(120).default(10),automatic:z.boolean().default(true)}).parse(await request.json());
+        const data = z.object({chapterId:idSchema,count:z.number().int().min(3).max(10).default(5),duration:z.number().int().min(1).max(120).default(10),automatic:z.boolean().default(true)}).parse(await readJson(request));
         if (data.automatic) {
           const chapter = await getChapter(data.chapterId,user.id);
           if (user.role==='student' && !chapter.studied) throw new AppError('Сначала изучите главу',403);
@@ -152,7 +156,7 @@ async function handle(request: Request, context: Context) {
       const id = idSchema.parse(path[1]);
       if (method === 'GET') return reply({attempt:await updateAttempt(id,user)});
       if (method === 'PATCH' || method === 'POST') {
-        const data = z.object({answers:z.record(z.string().uuid(),z.number().int().min(0).max(3)).refine(a => Object.keys(a).length <= 10).optional()}).parse(await request.json());
+        const data = z.object({answers:z.record(z.string().uuid(),z.number().int().min(0).max(3)).refine(a => Object.keys(a).length <= 10).optional()}).parse(await readJson(request));
         return reply({attempt:await updateAttempt(id,user,data.answers,method==='POST')});
       }
     }
@@ -163,3 +167,4 @@ export const GET = handle;
 export const POST = handle;
 export const PATCH = handle;
 export const DELETE = handle;
+export const PUT = handle;

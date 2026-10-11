@@ -29,7 +29,7 @@ export async function recognizePdf(file:File, languages:string[], force:boolean,
         const layer=await page.getTextContent();
         let text=layer.items.map(item=>'str' in item ? item.str+('hasEOL' in item && item.hasEOL?'\n':' ') : '').join('').trim();
         // A watermark or page number alone is not a usable text layer.
-        if(force || (text.match(/\p{L}/gu)||[]).length<100 || text.includes('\uFFFD')) {
+        if(force || (text.match(/[\p{L}\p{N}]/gu)||[]).length<100 || text.includes('\uFFFD')) {
           onProgress(`Распознаём скан: страница ${currentPage} из ${totalPages}…`);
           if(!worker) {
             const {createWorker,OEM}=await import('tesseract.js');
@@ -54,7 +54,7 @@ export async function recognizePdf(file:File, languages:string[], force:boolean,
           } finally {canvas.width=canvas.height=0;}
         }
         check();
-        if((text.match(/\p{L}/gu)||[]).length<10) {
+        if((text.match(/[\p{L}\p{N}]/gu)||[]).length<10) {
           unreadablePages++;
           text='[На этой странице не найден читаемый текст. Она может содержать обложку, рисунок или пустую страницу. Смотрите оригинальный PDF.]';
         }
