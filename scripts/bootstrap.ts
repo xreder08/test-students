@@ -2,7 +2,14 @@ import { randomBytes } from 'node:crypto';
 import { appendFileSync,writeFileSync } from 'node:fs';
 import { hashPassword } from '../src/lib/auth';
 import { newId,query } from '../src/lib/db';
+import {installBundledTextbook} from './install-textbook';
 if(process.env.VERCEL||!process.env.DATABASE_URL?.startsWith('file:'))throw new Error('Local bootstrap is only available for local SQLite.');
+for(const name of ['SESSION_SECRET','TEACHER_INVITE_CODE']){
+  if(!process.env[name]?.trim()){
+    process.env[name]=randomBytes(32).toString('hex');
+    appendFileSync('.env.local',`\n${name}=${process.env[name]}\n`);
+  }
+}
 const definitions=[
   {name:'Учитель',email:'teacher@edutest.local',role:'teacher',env:'LOCAL_TEACHER_PASSWORD'},
   {name:'Ученик',email:'student@edutest.local',role:'student',env:'LOCAL_STUDENT_PASSWORD'},
@@ -17,3 +24,4 @@ for(const definition of definitions){
 }
 writeFileSync('LOCAL_ACCESS.md',`# Локальный доступ к EduTest\n\nПриложение: http://127.0.0.1:3000\n\nЭтот файл содержит локальные данные входа. Он исключён из Git. Не публикуйте его.\n\n${accounts.map(a=>`## ${a.role==='teacher'?'Учитель':'Ученик'}\n\nEmail: ${a.email}\n\nПароль: ${a.password}\n`).join('\n')}\n## Регистрация нового учителя\n\nКод приглашения: ${process.env.TEACHER_INVITE_CODE}\n\nПри публикации используйте новые секреты и код приглашения; локальные аккаунты в облако не переносятся.\n`);
 console.log('Локальные аккаунты готовы. Данные входа сохранены в LOCAL_ACCESS.md (исключён из Git).');
+await installBundledTextbook();

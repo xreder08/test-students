@@ -13,6 +13,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "setup:local": "node --env-file=.env.local --import tsx scripts/bootstrap.ts",
+    "setup:book": "node --env-file=.env.local --import tsx scripts/install-textbook.ts",
     "check:secrets": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
