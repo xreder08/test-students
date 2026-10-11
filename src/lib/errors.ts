@@ -1,6 +1,6 @@
 import { ZodError } from 'zod';
 export class AppError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, public status = 400, public retryAfterSeconds?:number) { super(message); }
 }
 export function errorResponse(error: unknown) {
   const headers={'Cache-Control':'private, no-store'};

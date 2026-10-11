@@ -10,6 +10,15 @@ import { readBookForm } from '../src/lib/upload';
 import {epubSections,resolveEpubPath,readEpubArchive} from '../src/lib/epub';
 import {readJson,MAX_JSON_BODY_BYTES} from '../src/lib/request-body';
 import {checkRoute} from '../src/lib/api-routes';
+import {normalizeNumericComparison} from '../src/lib/ai-math';
+
+test('numeric comparison questions have one mathematically correct answer',()=>{
+  const question={text:'Как правильно записать сравнение чисел 745 и 815?',options:['745 > 815','745 < 815','745 = 815','745 ≠ 815'],correct:1,explanation:'Сравнение чисел.'};
+  const fixed=normalizeNumericComparison(question,'Страница 14');
+  assert.deepEqual(fixed.options,['745 < 815','745 > 815','745 = 815','Недостаточно данных для сравнения']);assert.equal(fixed.correct,0);
+  const greater=normalizeNumericComparison({...question,text:'Как сравнить 8463 и 8436?',options:['8463 < 8436','8463 > 8436','8463 = 8436','8463 ≠ 8436']},'Страница 14');assert.equal(greater.correct,1);
+  assert.equal(normalizeNumericComparison({...question,text:'Какое неравенство неверно?'},'Страница 14').options,question.options);
+});
 
 test('passwords are salted and verified without storing plaintext',async()=>{
   const first=await hashPassword('SomePassword123!'),second=await hashPassword('SomePassword123!');

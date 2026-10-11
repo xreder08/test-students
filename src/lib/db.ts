@@ -14,6 +14,7 @@ export function database(): Client {
 }
 const schema = [
   `PRAGMA foreign_keys = ON`,
+  `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('teacher','student')), created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS books (id TEXT PRIMARY KEY, owner_id TEXT REFERENCES users(id), title TEXT NOT NULL, subject TEXT NOT NULL, grade INTEGER NOT NULL CHECK(grade BETWEEN 1 AND 12), source_name TEXT NOT NULL, format TEXT NOT NULL, original BLOB, created_at TEXT NOT NULL, color INTEGER NOT NULL DEFAULT 0)`,
@@ -39,6 +40,13 @@ export async function query(sql: string, args: InValue[] = []) {
   return database().execute({sql, args});
 }
 async function seed() {
+  const db=database();
+  if((await db.execute("SELECT value FROM app_settings WHERE key='sample_book_seeded'")).rows.length)return;
+  // Existing libraries must not gain another sample book on every restart.
+  if((await db.execute('SELECT id FROM books LIMIT 1')).rows.length){
+    await db.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES('sample_book_seeded','1')");
+    return;
+  }
   const id = 'a1111111-1111-4111-8111-111111111111';
   const content = [
     ['Натуральные числа', 'Натуральные числа используют для счёта предметов: 1, 2, 3, 4 и так далее. Число 0 показывает отсутствие предметов. В этом учебном материале натуральный ряд начинается с 1.\n\nВ десятичной системе значение цифры зависит от её позиции. В числе 352 цифра 3 обозначает три сотни, 5 — пять десятков, 2 — две единицы. Получаем 352 = 300 + 50 + 2.\n\nЧтобы сравнить числа с разным количеством цифр, достаточно сравнить количество цифр: 1000 больше 999. Если цифр поровну, сравниваем их слева направо: 426 больше 419, потому что после одинаковых сотен 2 десятка больше 1 десятка.\n\nЧисловой луч начинается в точке 0. Равные отрезки соответствуют одинаковой единице. Число справа больше числа слева. Между 6 и 9 находятся 7 и 8.\n\nПопробуй сам: разложи 704 на разрядные слагаемые. Ответ: 700 + 4. Сравни 580 и 508. Ответ: 580 больше 508.'],
@@ -48,6 +56,7 @@ async function seed() {
   await database().batch([
     {sql: 'INSERT OR IGNORE INTO books(id,title,subject,grade,source_name,format,created_at,color) VALUES(?,?,?,?,?,?,?,?)', args: [id,'Математика. Первые шаги','Математика',5,'Оригинальный учебный материал EduTest','text',new Date().toISOString(),0]},
     ...content.map(([title, text], i) => ({sql: 'INSERT OR IGNORE INTO chapters(id,book_id,title,content,position) VALUES(?,?,?,?,?)', args: [`b1111111-1111-4111-8111-11111111111${i}`,id,title,text,i]})),
+    {sql:"INSERT OR IGNORE INTO app_settings(key,value) VALUES('sample_book_seeded','1')",args:[]},
   ], 'write');
 }
 export const newId = randomUUID;

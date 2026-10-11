@@ -97,6 +97,15 @@ export default function Workspace() {
   useEffect(()=>{if(nav.view==='attempt'&&attempt?.status==='active'&&Date.parse(attempt.deadline)<=now&&!busy&&now-lastAutoFinish.current>10000){lastAutoFinish.current=now;void finishAttempt();}},[now,nav.view,attempt,busy,finishAttempt]);
   async function run(key:string, action:()=>Promise<void>) {setBusy(key);setError('');setNotice('');try{await action();}catch(e){setError((e as Error).message);}finally{setBusy('');}}
   function openBook(book:Book){setDetail(null);setChapter(null);navigate({view:'reader',book:book.id});}
+  async function deleteBook(book:{id:string;title:string}) {
+    if(busy||!window.confirm(`Удалить книгу «${book.title}»? Все её главы, тесты и результаты учеников тоже будут удалены. Отменить удаление нельзя.`))return;
+    await run('delete',async()=>{
+      await api(`books/${book.id}`,{method:'DELETE'});
+      await refresh();
+      if(nav.book===book.id){setDetail(null);setChapter(null);navigate({view:'library'});}
+      setNotice(`Книга «${book.title}» удалена.`);
+    });
+  }
   async function learnDone() {
     if(!chapter)return;
     await run('generate',async()=>{
@@ -151,7 +160,7 @@ export default function Workspace() {
         </>}
         <div className="section-heading"><div><h2>{nav.view==='home'?'Начни с книги':'Все учебные материалы'}</h2><p>{books.length} {books.length===1?'книга':'книг'} · PDF, EPUB, DOCX и текст</p></div>{nav.view==='home'&&<button className="text-btn" onClick={()=>navigate({view:'library'})}>Вся библиотека<ChevronRight size={17}/></button>}</div>
         <div className="library-tools"><label className="search-box"><Search size={19}/><input aria-label="Поиск книг" placeholder="Найти книгу или предмет" value={search} onChange={e=>setSearch(e.target.value)}/></label><select aria-label="Фильтр по классу" value={grade} onChange={e=>setGrade(e.target.value)}><option value="all">Все классы</option>{Array.from({length:12},(_,i)=><option key={i} value={i+1}>{i+1} класс</option>)}</select><span className="small muted">{filtered.length} материалов</span></div>
-        <div className="books-grid">{filtered.map(book=><BookCard key={book.id} book={book} onOpen={()=>openBook(book)}/>)}</div>
+        <div className="books-grid">{filtered.map(book=><div className="book-entry" key={book.id}><BookCard book={book} onOpen={()=>openBook(book)}/>{teacher&&book.ownerId===user.id&&<button className="text-btn book-delete" disabled={Boolean(busy)} aria-label={`Удалить книгу «${book.title}»`} onClick={()=>deleteBook(book)}>{busy==='delete'?<Spinner/>:<Trash2 size={16}/>}Удалить книгу</button>}</div>)}</div>
         {!filtered.length&&<Empty icon={<Library size={38}/>} title="Книг пока нет" text={search?'Попробуйте другой запрос.':teacher?'Добавьте первую книгу, чтобы начать обучение.':'Учитель скоро добавит учебные материалы.'}/>} 
         {nav.view==='home'&&<div className="how-it-works"><h3>Три шага к пониманию</h3>{['Прочитай главу','Разбери сложное с ИИ','Закрепи знания тестом'].map((s,i)=><div key={s}><span>{i+1}</span>{s}</div>)}</div>}
       </>}
